@@ -49,11 +49,11 @@ function clean() {
 function jars() {
     mkdir -p obj
     javac -classpath $APPCLASSPATH -d obj \
-        $APPNAME/*.java
+        client/$APPNAME/*.java
     # stop if compilation fails
     if [ $? != 0 ]; then exit; fi
     pushd obj > /dev/null
-    jar cvf ../$APPNAME.jar $APPNAME/UDFLib*.class
+    jar cvf ../$APPNAME.jar $APPNAME/UDF*.class
     popd > /dev/null
 }
 
@@ -92,6 +92,7 @@ function udfbenchmark() {
         --displayinterval=5 \
         --servers=localhost \
         --datasize=10000 \
+        --latencyreport=true \
         --statsfile=udfstats-`date '+%Y-%m-%d'`
 }
 
