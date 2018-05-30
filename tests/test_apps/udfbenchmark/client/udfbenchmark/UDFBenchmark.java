@@ -371,7 +371,7 @@ public final class UDFBenchmark extends ClientAppBase {
 
             fw.append(String.format("%d,%f,%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%d\n",
                 0,
-                duration / 1000,
+                duration,
                 totalInvoc,
                 thruput,
                 avgLatcy,
