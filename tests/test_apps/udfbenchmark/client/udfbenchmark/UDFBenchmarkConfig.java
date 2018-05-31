@@ -25,13 +25,13 @@ package udfbenchmark;
 
 import org.voltdb.ClientAppBase;
 
-public class UDFBenchmarkConfig extends ClientAppBase.AppClientConfig //CLIConfig 
+public class UDFBenchmarkConfig extends ClientAppBase.AppClientConfig //CLIConfig
 {
 
     @Option(desc = "name of the benchmark to run")
     String name = "UDF Benchmark";
 
-	@Option(desc = "Comma separated list of the form server[:port] to connect to.")
+    @Option(desc = "Comma separated list of the form server[:port] to connect to.")
     String servers = "localhost";
 
     @Option(desc = "Number of rows inserted for the benchmark.")
