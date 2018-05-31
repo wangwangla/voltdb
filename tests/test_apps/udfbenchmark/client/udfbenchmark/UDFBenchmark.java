@@ -349,6 +349,10 @@ public final class UDFBenchmark extends ClientAppBase {
         System.out.println("  stats.getLatencyBucketsBy100ms:" + Arrays.toString(stats.getLatencyBucketsBy100ms()));
         System.out.println("  stats.getLatencyBucketsBy10ms :" + Arrays.toString(stats.getLatencyBucketsBy10ms()));
         System.out.println("  stats.getLatencyBucketsBy1ms  :" + Arrays.toString(stats.getLatencyBucketsBy1ms()));
+        System.out.println("  stats.kPercentileLatency(0)   :" + stats.kPercentileLatency(0.0));
+        System.out.println("  stats.kPercentileLatency(1)   :" + stats.kPercentileLatency(1.0));
+        System.out.println("  stats.kPercentileLatencyAsDouble(0):" + stats.kPercentileLatencyAsDouble(0.0));
+        System.out.println("  stats.kPercentileLatencyAsDouble(1):" + stats.kPercentileLatencyAsDouble(1.0));
 //        System.out.println("  config.duration        :" + config.duration);
 //        System.out.println("  config.duration * 1000 :" + config.duration * 1000);
         System.out.println("  duration               :" + duration);
@@ -371,7 +375,7 @@ public final class UDFBenchmark extends ClientAppBase {
 
             fw.append(String.format("%d,%f,%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%d\n",
                 0,
-                duration,
+                duration * 1000,
                 totalInvoc,
                 thruput,
                 avgLatcy,
