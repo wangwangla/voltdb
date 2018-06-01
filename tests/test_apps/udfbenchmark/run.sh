@@ -90,7 +90,7 @@ function udfbenchmark() {
     rm -f udfstats-*
     java -classpath obj:$APPCLASSPATH -Dlog4j.configuration=file://$LOG4J \
         $APPNAME.UDFBenchmark \
-        --name=$1
+        --name=$1 \
         --displayinterval=5 \
         --servers=localhost \
         --datasize=10000 \
