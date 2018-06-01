@@ -80,7 +80,8 @@ function server() {
 
 # run the client that drives the example
 function client() {
-    $APPNAME
+    $APPNAME udf-partitioned
+    $APPNAME udf-replicated
 }
 
 function udfbenchmark() {
@@ -89,11 +90,12 @@ function udfbenchmark() {
     rm -f udfstats-*
     java -classpath obj:$APPCLASSPATH -Dlog4j.configuration=file://$LOG4J \
         $APPNAME.UDFBenchmark \
+        --name=$1
         --displayinterval=5 \
         --servers=localhost \
         --datasize=10000 \
         --latencyreport=true \
-        --statsfile=udfstats-`date '+%Y-%m-%d'`
+        --statsfile=$1-stats-`date '+%Y-%m-%d'`
 }
 
 function help() {
