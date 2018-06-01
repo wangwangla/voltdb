@@ -381,7 +381,7 @@ public final class UDFBenchmark extends ClientAppBase {
             // TODO: temp debug:
             System.out.println("  FileWriter fw:" + fw);
 
-            fw.append(String.format("%d,%f,%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%d\n",
+            fw.append(String.format("%d,%.6f,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d,%d\n",
                 0,
                 duration / 1000,
                 totalInvoc,
