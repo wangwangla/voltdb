@@ -106,12 +106,13 @@ public final class UDFBenchmark extends ClientAppBase {
             return stats.count(procedureName + event);
         }
 
-        public static void printProcedureResults(String procedureName) {
-            System.out.println("  " + procedureName);
-            System.out.println("        calls: " + getCount(procedureName,"call"));
-            System.out.println("      commits: " + getCount(procedureName,"commit"));
-            System.out.println("    rollbacks: " + getCount(procedureName,"rollback"));
-        }
+        // TODO: not sure what is needed here; probably just delete
+//        public static void printProcedureResults(String procedureName) {
+//            System.out.println("  " + procedureName);
+//            System.out.println("        calls: " + getCount(procedureName,"call"));
+//            System.out.println("      commits: " + getCount(procedureName,"commit"));
+//            System.out.println("    rollbacks: " + getCount(procedureName,"rollback"));
+//        }
 
         public ProcCallback(String procedure, long maxErrors) {
             super();
@@ -157,41 +158,44 @@ public final class UDFBenchmark extends ClientAppBase {
         UDFBenchmarkConfig config = (UDFBenchmarkConfig)m_config;
         m_appRunning = true;
 
-        // Partitioned table P1
-        printTaskHeader("Inserting rows into P1...");
-        generateData("P1", config.datasize);
-        printTaskHeader("Running benchmark on partitioned table P1...");
-        resetStats();
-        for (int i = 0; i < config.datasize; i++) {
-            m_client.callProcedure(new NullCallback(), "P1Tester", i);
+        if (config.name.toLowerCase().contains("replicated")) {
+            // Replicated table R1
+            printTaskHeader("Inserting rows into R1...");
+            generateData("R1", config.datasize);
+            printTaskHeader("Running benchmark on replicated table R1...");
+            resetStats();
+            for (int i = 0; i < config.datasize; i++) {
+                m_client.callProcedure(new NullCallback(), "R1Tester", i);
+            }
+            m_client.drain();
+            m_timer.cancel();
+
+            // TODO: temp debug:
+            System.out.println("In UDFBenchmark.run:");
+            System.out.println("  about to call printResults with 'udf-replicated'.");
+
+            printResults("udf-replicated");
+            m_client.callProcedure("@AdHoc", "TRUNCATE TABLE R1;");
+
+        } else {
+            // Partitioned table P1
+            printTaskHeader("Inserting rows into P1...");
+            generateData("P1", config.datasize);
+            printTaskHeader("Running benchmark on partitioned table P1...");
+            resetStats();
+            for (int i = 0; i < config.datasize; i++) {
+                m_client.callProcedure(new NullCallback(), "P1Tester", i);
+            }
+            m_client.drain();
+            m_timer.cancel();
+
+            // TODO: temp debug:
+            System.out.println("In UDFBenchmark.run:");
+            System.out.println("  about to call printResults with 'udf-partitioned'.");
+
+            printResults("udf-partitioned");
+            m_client.callProcedure("@AdHoc", "TRUNCATE TABLE P1;");
         }
-        m_client.drain();
-        m_timer.cancel();
-
-        // TODO: temp debug:
-        System.out.println("In UDFBenchmark.run:");
-        System.out.println("  about to call printResults with 'udf-partitioned'.");
-
-        printResults("udf-partitioned");
-        m_client.callProcedure("@AdHoc", "TRUNCATE TABLE P1;");
-
-        // Replicated table R1
-        printTaskHeader("Inserting rows into R1...");
-        generateData("R1", config.datasize);
-        printTaskHeader("Running benchmark on replicated table R1...");
-        resetStats();
-        for (int i = 0; i < config.datasize; i++) {
-            m_client.callProcedure(new NullCallback(), "R1Tester", i);
-        }
-        m_client.drain();
-        m_timer.cancel();
-
-        // TODO: temp debug:
-        System.out.println("In UDFBenchmark.run:");
-        System.out.println("  about to call printResults with 'udf-replicated'.");
-
-        printResults("udf-replicated");
-        m_client.callProcedure("@AdHoc", "TRUNCATE TABLE R1;");
 
         // Finish up.
         m_appRunning = false;
@@ -275,7 +279,7 @@ public final class UDFBenchmark extends ClientAppBase {
         long invocErrs = 0, invocAbrts = 0, invocTimeOuts = 0;
         double avgLatcy = 0.0, k95pLatcy = 0.0, k99pLatcy = 0.0, internalLatcy = 0.0;
         long totalInvoc = 0;
-        double duration = 0.0;
+        double duration = 0.0, minLatcy = 0.0, maxLatcy = 0.0;
 
 //        for (int i = 0; i < m_config.clientscount; i++) {
             ClientStats stats = m_fullStatsContext.fetchAndResetBaseline().getStats();
@@ -298,6 +302,8 @@ public final class UDFBenchmark extends ClientAppBase {
         k99pLatcy = k99pLatcy / (double) totalInvoc;
         internalLatcy = internalLatcy / (double) totalInvoc;
         duration = stats.getDuration();
+        minLatcy = stats.kPercentileLatencyAsDouble(0.0);
+        maxLatcy = stats.kPercentileLatencyAsDouble(1.0);
 
 
         // Performance statistics
@@ -309,6 +315,8 @@ public final class UDFBenchmark extends ClientAppBase {
         // cast stats.getAverateLatency from long to double
         System.out.printf("Average latency:               %,9.2f ms\n", avgLatcy);
         //System.out.printf("Average latency:               %,9d ms\n", stats.getAverageLatency());
+        System.out.printf("Minimum latency:               %,9.2f ms\n", minLatcy);
+        System.out.printf("Maximum latency:               %,9.2f ms\n", maxLatcy);
         System.out.printf("95th percentile latency:       %,9.2f ms\n", k95pLatcy);
         System.out.printf("99th percentile latency:       %,9.2f ms\n", k99pLatcy);
 
@@ -324,12 +332,12 @@ public final class UDFBenchmark extends ClientAppBase {
         System.out.println(" Transaction Results");
         System.out.println(HORIZONTAL_RULE);
 
-        // TODO: not sure what is needed here
-        ProcCallback.printProcedureResults("CARD_ACCOUNT.insert");
-        ProcCallback.printProcedureResults("Authorize");
-        ProcCallback.printProcedureResults("Redeem");
-        ProcCallback.printProcedureResults("Transfer");
-        ProcCallback.printProcedureResults("Select");
+        // TODO: not sure what is needed here; probably just delete
+//        ProcCallback.printProcedureResults("CARD_ACCOUNT.insert");
+//        ProcCallback.printProcedureResults("Authorize");
+//        ProcCallback.printProcedureResults("Redeem");
+//        ProcCallback.printProcedureResults("Transfer");
+//        ProcCallback.printProcedureResults("Select");
 
         // Write stats to file if requested
         // client.writeSummaryCSV(stats, m_config.statsfile);
@@ -375,7 +383,7 @@ public final class UDFBenchmark extends ClientAppBase {
 
             fw.append(String.format("%d,%f,%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%d\n",
                 0,
-                duration * 1000,
+                duration,
                 totalInvoc,
                 thruput,
                 avgLatcy,
