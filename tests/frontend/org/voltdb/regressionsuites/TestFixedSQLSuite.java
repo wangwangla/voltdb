@@ -3130,52 +3130,65 @@ public class TestFixedSQLSuite extends RegressionSuite {
         assertContentOfTable(new Object[][] {{gpv}}, vt);
     }
 
-    public void testEng13801() throws Exception {
-        if (isHSQL()) {
-            return;
-        }
-
+    public void testOrderByAggregateNoGroupBy() throws Exception {
         Client client = getClient();
 
-        // In this bug, the COUNT(*) in the ORDER BY clause was in the query's
-        // result, even though it's not in the SELECT list.
-        VoltTable vt = client.callProcedure("@AdHoc",
-                "SELECT MIN(VCHAR_INLINE) FROM ENG_13852_R11 AS T1 ORDER BY COUNT(*), T1.BIG;").getResults()[0];
-        assertEquals(1, vt.getColumnCount());
+        // In this bug, the aggregate functions in queries with no GROUP BY
+        // clause wreaked havoc because neither VoltDB or HSQL could deal with them.
+        //
+        // Fix is to disallow aggregate functions in ORDER BY clause when
+        // there is no GROUP BY clause.
+        //
+        // Related tickets: ENG-13929, ENG-13801.
 
-        assertSuccessfulDML(client,
-                "insert into ENG_13852_P5 values ( \n" +
-                        "        0, \n" +
-                        "        1, 10, 100, 1000,\n" +
-                        "        1.0, 2.0,\n" +
-                        "        'foo', 'bar', 'baz', 'boo', 'bugs',\n" +
-                        "        now,\n" +
-                        "        x'ab',\n" +
-                        "        pointfromtext('point(1 0)'), -- point\n" +
-                        "        null, -- polygon\n" +
-                        "        null, null, null, x'ab')");
-        assertSuccessfulDML(client, "insert into ENG_13852_R11 values (\n" +
-                "        0,\n" +
-                "        1, 10, 100, 1000,\n" +
-                "        1.0, 2.0,\n" +
-                "        'foo', 'bar', 'baz', 'boo', 'bugs',\n" +
-                "        now,\n" +
-                "        x'ab',\n" +
-                "        pointfromtext('point(0 0)'), -- point\n" +
-                "        null, -- polygon\n" +
-                "        null, null, null, x'ab')");
+        String sql =  "SELECT MIN(VCHAR_INLINE) FROM ENG_13852_R11 AS T1 ORDER BY COUNT(*), T1.BIG;";
+        verifyStmtFails(client, sql,"invalid ORDER BY expression");
 
         // Original query found by grammar generator:
-        vt = client.callProcedure("@AdHoc",
-                "SELECT 'foo' AS CA2, OUTER_TBL.TINY " +
-                        "FROM ENG_13852_P5 AS OUTER_TBL " +
-                        "WHERE VCHAR_INLINE != (" +
-                        "  SELECT MAX(VCHAR) " +
-                        "  FROM ENG_13852_R11 AS INNER_TBL " +
-                        "  WHERE POINT != OUTER_TBL.POINT " +
-                        "  ORDER BY COUNT(*)) " +
-                        "ORDER BY NUM;").getResults()[0];
-        assertContentOfTable(new Object[][] {{"foo", 1}}, vt);
+        sql = "SELECT 'foo' AS CA2, OUTER_TBL.TINY " +
+                "FROM ENG_13852_P5 AS OUTER_TBL " +
+                "WHERE VCHAR_INLINE != (" +
+                "  SELECT MAX(VCHAR) " +
+                "  FROM ENG_13852_R11 AS INNER_TBL " +
+                "  WHERE POINT != OUTER_TBL.POINT " +
+                "  ORDER BY COUNT(*)) " +
+                "ORDER BY NUM;";
+        verifyStmtFails(client, sql, "invalid ORDER BY expression");
+
+        sql = "SELECT 'foo' " +
+                "FROM ENG_13852_R11 T1 " +
+                "ORDER BY COUNT(*) DESC;";
+        verifyStmtFails(client, sql, "invalid ORDER BY expression");
+
+        // Aggregate functions in subexpressions of OB clause should also
+        // be invalid:
+        sql = "SELECT 'foo' " +
+                "FROM ENG_13852_R11 T1 " +
+                "ORDER BY MAX(ID) / COUNT(*) DESC;";
+        verifyStmtFails(client, sql, "invalid ORDER BY expression");
+
+        sql = "SELECT 'foo' " +
+                "FROM ENG_13852_R11 T1 " +
+                "ORDER BY ABS(COUNT(*)) DESC;";
+        verifyStmtFails(client, sql, "invalid ORDER BY expression");
+
+        // Similar query with AVG
+        sql = "SELECT 79 AS const_num " +
+                "FROM ENG_13852_R11 T1 " +
+                "ORDER BY AVG(const_num);";
+        verifyStmtFails(client, sql, "invalid ORDER BY expression");
+
+        // Similar query with GB clause
+        sql = "SELECT 'foo' " +
+                "FROM ENG_13852_R11 T1 " +
+                "GROUP BY tiny " +
+                "ORDER BY COUNT(*)";
+        verifyStmtFails(client, sql, "invalid ORDER BY expression");
+
+        sql = "SELECT TOP 3  -699 AS CA4 " +
+                "FROM ENG_13852_R11 , ENG_13852_VR5     " +
+                "ORDER BY COUNT(*) DESC, ENG_13852_R11.ID DESC;";
+        verifyStmtFails(client, sql, "invalid ORDER BY expression");
     }
 
     //
@@ -3229,7 +3242,7 @@ public class TestFixedSQLSuite extends RegressionSuite {
         success = config.compile(project);
         assertTrue(success);
         builder.addServerConfig(config);
-        // end of HSQDB config */
+        // end of HSQLDB config */
         return builder;
     }
 }
