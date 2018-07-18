@@ -73,6 +73,8 @@ public class ExportGeneration implements Generation {
 
     public final File m_directory;
 
+    private ExportManager m_manager;
+
     private String m_mailboxesZKPath;
 
     /**
@@ -87,11 +89,6 @@ public class ExportGeneration implements Generation {
     // Export generation mailboxes under the same partition id, excludes the local one.
     private Map<Integer, ImmutableList<Long>> m_replicasHSIds = new HashMap<>();
 
-    /**
-     * Set of partition ids for which this export manager instance is master of
-     */
-    private final Set<Integer> m_masterOfPartitions = new HashSet<Integer>();
-
     private Mailbox m_mbox = null;
 
     private volatile boolean shutdown = false;
@@ -104,8 +101,9 @@ public class ExportGeneration implements Generation {
      * @param exportOverflowDirectory
      * @throws IOException
      */
-    public ExportGeneration(File exportOverflowDirectory) throws IOException {
+    public ExportGeneration(File exportOverflowDirectory, ExportManager manager) throws IOException {
         m_directory = exportOverflowDirectory;
+        m_manager = manager;
         if (!m_directory.canWrite()) {
             if (!m_directory.mkdirs()) {
                 throw new IOException("Could not create " + m_directory);
@@ -124,16 +122,18 @@ public class ExportGeneration implements Generation {
             List<Integer> partitions,
             File exportOverflowDirectory)
     {
-        Set<Integer> allPartitions = new HashSet<>();
+        List<Integer> allLocalPartitions = new ArrayList<>(partitions);
         File files[] = exportOverflowDirectory.listFiles();
         if (files != null) {
-            allPartitions.addAll(initializeGenerationFromDisk(messenger));
+            List<Integer> onDiskPartitions = initializeGenerationFromDisk(messenger);
+            // Add new unique partitions from on disk list.
+            onDiskPartitions.removeAll(allLocalPartitions);
+            allLocalPartitions.addAll(onDiskPartitions);
         }
         initializeGenerationFromCatalog(catalogContext, connectors, hostId, messenger, partitions);
-        allPartitions.addAll(partitions);
+
         // One export mailbox per node, since we only keep one generation
-        createAckMailboxes(messenger, allPartitions);
-        updateReplicaList(messenger, allPartitions);
+        createAckMailboxesIfNeeded(messenger, allLocalPartitions);
     }
 
     List<Integer> initializeGenerationFromDisk(HostMessenger messenger) {
@@ -188,8 +188,15 @@ public class ExportGeneration implements Generation {
         }
     }
 
-    private void createAckMailboxes(HostMessenger messenger, final Set<Integer> localPartitions) {
-
+    /**
+     * Create export ack mailbox during generation initialization, do nothing if generation has already initialized.
+     * @param messenger  HostMessenger
+     * @param localPartitions  locally covered partitions
+     */
+    public void createAckMailboxesIfNeeded(HostMessenger messenger, final List<Integer> localPartitions) {
+        if (m_mbox != null) {
+            return;
+        }
         m_mailboxesZKPath = VoltZK.exportGenerations + "/" + "mailboxes";
 
         m_mbox = new LocalMailbox(messenger) {
@@ -272,18 +279,23 @@ public class ExportGeneration implements Generation {
             }
         };
         messenger.createMailbox(null, m_mbox);
+        // Update latest replica list to each data source.
+        updateReplicaList(messenger, localPartitions);
     }
 
     // Access by multiple threads
     public void updateAckMailboxes(int partition) {
         synchronized (m_dataSourcesByPartition) {
             for( ExportDataSource eds: m_dataSourcesByPartition.get(partition).values()) {
-                eds.updateAckMailboxes(Pair.of(m_mbox, m_replicasHSIds.get(partition)));
+                ImmutableList<Long> replicaHSIds = m_replicasHSIds.get(partition);
+                if (replicaHSIds != null) {
+                    eds.updateAckMailboxes(Pair.of(m_mbox, replicaHSIds));
+                }
             }
         }
     }
 
-    private void updateReplicaList(HostMessenger messenger, Set<Integer> localPartitions) {
+    private void updateReplicaList(HostMessenger messenger, List<Integer> localPartitions) {
         //If we have new partitions create mailbox paths.
         for (Integer partition : localPartitions) {
             final String partitionDN =  m_mailboxesZKPath + "/" + partition;
@@ -689,7 +701,6 @@ public class ExportGeneration implements Generation {
                 source.unacceptMastership();
             }
         }
-
     }
 
     /**
@@ -698,10 +709,6 @@ public class ExportGeneration implements Generation {
      * @param partitionId
      */
     public void prepareUnacceptMastership(int partitionId) {
-        // ignore if mastership for partition id is not on this host
-        if (!m_masterOfPartitions.contains(partitionId)) {
-            return;
-        }
         Map<String, ExportDataSource> partitionDataSourceMap = m_dataSourcesByPartition.get(partitionId);
 
         // this case happens when there are no export tables
@@ -719,12 +726,7 @@ public class ExportGeneration implements Generation {
      * @param partitionId
      */
     @Override
-    public void acceptMastershipTask( int partitionId) {
-        // can't acquire mastership twice for the same partition id
-        if (! m_masterOfPartitions.add(partitionId)) {
-            return;
-        }
-
+    public void acceptMastership(int partitionId) {
         Map<String, ExportDataSource> partitionDataSourceMap = m_dataSourcesByPartition.get(partitionId);
 
         // this case happens when there are no export tables
@@ -742,26 +744,11 @@ public class ExportGeneration implements Generation {
     }
 
     /**
-     * Indicate to all associated {@link ExportDataSource} to assume
-     * mastership role for the all master partitions on this host
-     */
-    public void acceptMastershipTaskForAll() {
-        for (int partitionId : m_masterOfPartitions) {
-            acceptMastershipTask(partitionId);
-        }
-    }
-
-    /**
      * Indicate to all associated {@link ExportDataSource}to PREPARE assume
      * mastership role for the given partition id
      * @param partitionId
      */
     void prepareAcceptMastership(int partitionId) {
-        // can't acquire mastership twice for the same partition id
-        if (!m_masterOfPartitions.add(partitionId)) {
-            return;
-        }
-
         Map<String, ExportDataSource> partitionDataSourceMap = m_dataSourcesByPartition.get(partitionId);
 
         // this case happens when there are no export tables
@@ -780,10 +767,6 @@ public class ExportGeneration implements Generation {
      * @param partitionId
      */
     void handlePartitionFailure(int partitionId) {
-        // ? if is already export master, don't need query
-        if (m_masterOfPartitions.contains(partitionId)) {
-            return;
-        }
         Map<String, ExportDataSource> partitionDataSourceMap = m_dataSourcesByPartition.get(partitionId);
 
         // this case happens when there are no export tables
@@ -852,7 +835,7 @@ public class ExportGeneration implements Generation {
         int drainedTables = (int)partitionDataSourceMap.values().stream().filter(eds -> eds.streamHasNoMaster()).count();
         if (partitionDataSourceMap.values().size() == drainedTables) {
             // This host is no longer the export master of given partition.
-            m_masterOfPartitions.remove(source.getPartitionId());
+            m_manager.removeMasterPartition(source.getPartitionId());
             sendMigrateMastershipEvent(source.getPartitionId(), partitionDataSourceMap);
         }
     }

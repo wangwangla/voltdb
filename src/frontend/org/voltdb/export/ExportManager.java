@@ -80,6 +80,11 @@ public class ExportManager
 
     private final HostMessenger m_messenger;
 
+    /**
+     * Set of partition ids for which this export manager instance is master of
+     */
+    private final Set<Integer> m_masterOfPartitions = new HashSet<Integer>();
+
     public static final byte RELEASE_BUFFER = 1;
 
     public static final byte MIGRATE_MASTER = 2;
@@ -169,6 +174,11 @@ public class ExportManager
             exportLog.debug("Export Manager has been notified that local partition " + partitionId + " to accept export mastership.");
         }
 
+        // can't acquire mastership twice for the same partition id
+        if (! m_masterOfPartitions.add(partitionId)) {
+            return;
+        }
+
         /*
          * Only the first generation will have a processor which
          * makes it safe to accept mastership.
@@ -177,7 +187,7 @@ public class ExportManager
         if (generation == null) {
             return;
         }
-        generation.acceptMastershipTask(partitionId);
+        generation.acceptMastership(partitionId);
     }
 
     /**
@@ -186,6 +196,10 @@ public class ExportManager
      * @param partitionId
      */
     synchronized public void prepareAcceptMastership(int partitionId) {
+        // can't acquire mastership twice for the same partition id
+        if (!m_masterOfPartitions.add(partitionId)) {
+            return;
+        }
         if (exportLog.isDebugEnabled()) {
             exportLog.debug("Export Manager has been notified that local partition " + partitionId + " has became leader.");
         }
@@ -203,6 +217,10 @@ public class ExportManager
      * @param partitionId
      */
     synchronized public void handlePartitionFailure(int partitionId) {
+        // ? if is already export master, don't need query
+        if (m_masterOfPartitions.contains(partitionId)) {
+            return;
+        }
         if (exportLog.isDebugEnabled()) {
             exportLog.debug("Export Manager has been notified that local partition " + partitionId + "  has encountered node failure.");
         }
@@ -219,6 +237,10 @@ public class ExportManager
      * @param partitionId
      */
     synchronized public void prepareUnacceptMastership(int partitionId) {
+        // ignore if mastership for partition id is not on this host
+        if (!m_masterOfPartitions.contains(partitionId)) {
+            return;
+        }
         if (exportLog.isDebugEnabled()) {
             exportLog.debug("ExportManager has been notified the sp leader for " + partitionId + " has been migrated away");
         }
@@ -227,6 +249,10 @@ public class ExportManager
             return;
         }
         generation.prepareUnacceptMastership(partitionId);
+    }
+
+    synchronized public void removeMasterPartition(int partitionId) {
+        m_masterOfPartitions.remove(partitionId);
     }
 
     /**
@@ -375,7 +401,7 @@ public class ExportManager
             m_processor.set(newProcessor);
 
             File exportOverflowDirectory = new File(VoltDB.instance().getExportOverflowPath());
-            ExportGeneration generation = new ExportGeneration(exportOverflowDirectory);
+            ExportGeneration generation = new ExportGeneration(exportOverflowDirectory, this);
             generation.initialize(m_messenger, m_hostId, catalogContext, connectors, partitions, exportOverflowDirectory);
 
             m_generation.set(generation);
@@ -419,7 +445,7 @@ public class ExportManager
         if (m_generation.get() == null) {
             File exportOverflowDirectory = new File(VoltDB.instance().getExportOverflowPath());
             try {
-                ExportGeneration gen = new ExportGeneration(exportOverflowDirectory);
+                ExportGeneration gen = new ExportGeneration(exportOverflowDirectory, this);
                 m_generation.set(gen);
             } catch (IOException crash) {
                 //This means durig UAC we had a bad disk on a node or bad directory.
@@ -439,9 +465,7 @@ public class ExportManager
             }
             try {
                 generation.initializeGenerationFromCatalog(catalogContext, connectors, m_hostId, m_messenger, partitions);
-                for (int partition : partitions) {
-                    generation.updateAckMailboxes(partition);
-                }
+                generation.createAckMailboxesIfNeeded(m_messenger, partitions);
                 if (exportLog.isDebugEnabled()) {
                     exportLog.debug("Creating connector " + m_loaderClass);
                 }
@@ -463,7 +487,9 @@ public class ExportManager
                  * We stashed away all the ones we have mastership of
                  * in m_masterOfPartitions
                  */
-                generation.acceptMastershipTaskForAll();
+                for (Integer partitionId: m_masterOfPartitions) {
+                    generation.acceptMastership(partitionId);
+                }
             }
             catch (final ClassNotFoundException e) {
                 exportLog.l7dlog( Level.ERROR, LogKeys.export_ExportManager_NoLoaderExtensions.name(), e);
@@ -484,40 +510,42 @@ public class ExportManager
             ExportGeneration generation,
             CatalogMap<Connector> connectors,
             List<Integer> partitions,
-            Map<String, Pair<Properties, Set<String>>> config) {
+            Map<String, Pair<Properties, Set<String>>> config)
+    {
+        ExportDataProcessor oldProcessor = m_processor.get();
+        if (exportLog.isDebugEnabled()) {
+            exportLog.debug("Shutdown guestprocessor");
+        }
+        oldProcessor.shutdown();
+        if (exportLog.isDebugEnabled()) {
+            exportLog.debug("Processor shutdown completed, install new export processor");
+        }
+        generation.unacceptMastership();
+        if (exportLog.isDebugEnabled()) {
+            exportLog.debug("Existing export datasources unassigned.");
+        }
+        //Load any missing tables.
+        generation.initializeGenerationFromCatalog(catalogContext, connectors, m_hostId, m_messenger, partitions);
+        for (int partition : partitions) {
+            generation.updateAckMailboxes(partition);
+        }
 
-            ExportDataProcessor oldProcessor = m_processor.get();
-            if (exportLog.isDebugEnabled()) {
-                exportLog.debug("Shutdown guestprocessor");
+        //We create processor even if we dont have any streams.
+        try {
+            ExportDataProcessor newProcessor = getNewProcessorWithProcessConfigSet(config);
+            newProcessor.setExportGeneration(generation);
+            if (m_startPolling && !config.isEmpty()) {
+                newProcessor.startPolling();
             }
-            oldProcessor.shutdown();
-            if (exportLog.isDebugEnabled()) {
-                exportLog.debug("Processor shutdown completed, install new export processor");
-            }
-            generation.unacceptMastership();
-            if (exportLog.isDebugEnabled()) {
-                exportLog.debug("Existing export datasources unassigned.");
-            }
-            //Load any missing tables.
-            generation.initializeGenerationFromCatalog(catalogContext, connectors, m_hostId, m_messenger, partitions);
-            for (int partition : partitions) {
-                generation.updateAckMailboxes(partition);
-            }
-
-            //We create processor even if we dont have any streams.
-            try {
-                ExportDataProcessor newProcessor = getNewProcessorWithProcessConfigSet(config);
-                newProcessor.setExportGeneration(generation);
-                if (m_startPolling && !config.isEmpty()) {
-                    newProcessor.startPolling();
-                }
-                m_processor.getAndSet(newProcessor);
-                newProcessor.readyForData();
-            }
-            catch (Exception crash) {
-                VoltDB.crashLocalVoltDB("Error creating next export processor", true, crash);
-            }
-            generation.acceptMastershipTaskForAll();
+            m_processor.getAndSet(newProcessor);
+            newProcessor.readyForData();
+        }
+        catch (Exception crash) {
+            VoltDB.crashLocalVoltDB("Error creating next export processor", true, crash);
+        }
+        for (int partitionId : m_masterOfPartitions) {
+            generation.acceptMastership(partitionId);
+        }
     }
 
     private  ExportDataProcessor getNewProcessorWithProcessConfigSet(Map<String, Pair<Properties, Set<String>>> config) throws ClassNotFoundException, InstantiationException, IllegalAccessException {

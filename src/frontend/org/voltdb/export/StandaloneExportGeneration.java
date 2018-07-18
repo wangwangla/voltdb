@@ -277,7 +277,7 @@ public class StandaloneExportGeneration implements Generation {
      * @param partitionId
      */
     @Override
-    public void acceptMastershipTask( int partitionId) {
+    public void acceptMastership( int partitionId) {
         Map<String, ExportDataSource> partitionDataSourceMap = m_dataSourcesByPartition.get(partitionId);
 
         // this case happens when there are no export tables
