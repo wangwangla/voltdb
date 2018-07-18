@@ -18,13 +18,15 @@ create table r1_aa_sq_idx (
     id  bigint not null primary key,
     aa  bigint not null
 );
-create index index_r1_aa_sq_idx on r1_aaidx (aa * aa);
+create index index_r1_aa_sq_idx on r1_aa_sq_idx (aa * aa);
 
 create table r1_allidx (
     id  bigint not null primary key,
     aa  bigint not null
 );
 create unique index index_r1_allidx on r1_allidx (aa, id);
+
+create unique index index_r1_all_sq_idx on r1_allidx (aa * aa, id * id);
 
 create table p1 (
     id  bigint not null primary key,

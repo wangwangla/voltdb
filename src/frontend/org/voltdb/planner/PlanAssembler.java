@@ -2003,6 +2003,7 @@ public class PlanAssembler {
         int numberWindowFunctions = 0;
         int numberReceiveNodes = 0;
         int numberHashAggregates = 0;
+        int numberOrderBys = 0;
         // EE keeps the insertion ORDER so that ORDER BY could apply before DISTINCT.
         // However, this probably is not optimal if there are low cardinality results.
         // Again, we have to replace the TVEs for ORDER BY clause for these cases in planning.
@@ -2014,27 +2015,38 @@ public class PlanAssembler {
                     || (probe instanceof AbstractScanPlanNode))
                 && (probe != null);
             probe = (probe.getChildCount() > 0) ? probe.getChild(0) : null) {
-            // Count the number of window functions between the
-            // root and the join/scan node.  Note that we know we
-            // have a statement level order by (SLOB) here.  If the SLOB
-            // can use the index for ordering the scan or join node,
-            // we will have recorded it in the scan or join node.
-            if (probe.getPlanNodeType() == PlanNodeType.WINDOWFUNCTION) {
-                numberWindowFunctions += 1;
-            }
-            // Also, see if there are receive nodes.  We need to
-            // generate an ORDERBY node if there are RECEIVE nodes,
-            // because the RECEIVE->MERGERECEIVE microoptimization
-            // needs them.
-            if (probe.getPlanNodeType() == PlanNodeType.RECEIVE) {
-                numberReceiveNodes += 1;
-            }
-            // Finally, count the number of non-serial aggregate
-            // nodes.  A hash or partial aggregate operation invalidates
-            // the ordering, but a serial aggregation does not.
-            if ((probe.getPlanNodeType() == PlanNodeType.HASHAGGREGATE)
-                    || (probe.getPlanNodeType() == PlanNodeType.PARTIALAGGREGATE)) {
-                numberHashAggregates += 1;
+
+            // Count nodes until we find the scan or join node.
+            switch (probe.getPlanNodeType()) {
+                case WINDOWFUNCTION:
+                    // Count the number of window functions between the
+                    // root and the join/scan node.  Note that we know we
+                    // have a statement level order by (SLOB) here.  If the SLOB
+                    // can use the index for ordering the scan or join node,
+                    // we will have recorded it in the scan or join node.
+                    numberWindowFunctions += 1;
+                    break;
+                case RECEIVE:
+                    // Also, see if there are receive nodes.  We need to
+                    // generate an ORDERBY node if there are RECEIVE nodes,
+                    // because the RECEIVE->MERGERECEIVE microoptimization
+                    // needs them.
+                    numberReceiveNodes += 1;
+                    break;
+                case ORDERBY:
+                    // ORDERBY nodes invalidate the index scan ordering,
+                    // so count them as well.
+                    numberOrderBys += 1;
+                    break;
+                case PARTIALAGGREGATE:
+                case HASHAGGREGATE:
+                    // Finally, count the number of non-serial aggregate
+                    // nodes.  A hash or partial aggregate operation invalidates
+                    // the ordering, but a serial aggregation does not.
+                    numberHashAggregates += 1;
+                    break;
+                default:
+                    break;
             }
         }
         if (probe == null) {
@@ -2091,10 +2103,10 @@ public class PlanAssembler {
         if (indexUse.getSortOrderFromIndexScan() == SortDirectionType.INVALID) {
             return true;
         }
-        // Hash aggregates and partial aggregates
+        // Hash aggregates, order bys and partial aggregates
         // invalidate the index ordering.  So, we will need
         // an ORDERBY node.
-        if (numberHashAggregates > 0) {
+        if (numberHashAggregates > 0 || numberOrderBys > 0) {
             return true;
         }
         if ( numberWindowFunctions == 0 ) {
@@ -2511,7 +2523,9 @@ public class PlanAssembler {
      *
      * @param candidate
      * @param gbInfo
-     * @return true when planner has placed a new node at the top of the candidate.
+     * @return true when planner has made the switch.  If this is a
+     *         LTT query we will always make the switch, sometimes by
+     *         adding ORDERBY nodes, and sometimes by using indexes.
      */
     private boolean switchToOrderedScanForGroupBy(AbstractPlanNode candidate,
                                                   GroupByOrderInfo gbInfo) {
@@ -2523,11 +2537,23 @@ public class PlanAssembler {
 
         if (candidate instanceof IndexScanPlanNode) {
             calculateIndexGroupByInfo((IndexScanPlanNode) candidate, gbInfo);
-            if (gbInfo.m_coveredGroupByColumns != null &&
+            if (!m_isLargeQuery &&
+                    gbInfo.m_coveredGroupByColumns != null &&
                     !gbInfo.m_coveredGroupByColumns.isEmpty()) {
                 // The candidate index does cover all or some
-                // of the GROUP BY columns and can be serialized
+                // of the GROUP BY columns and can be serialized.
                 gbInfo.m_sortedNode = candidate;
+                return true;
+            }
+            // For LTT queries, we always need to force serial
+            // aggregation.  We do this by inserting an order by
+            // node if necessary.
+            if (m_isLargeQuery) {
+                // If we have not changed to a serial aggregate, then
+                // we need to here.
+                if (!gbInfo.isChangedToSerialAggregate()) {
+                    candidate = addOrderByForSerialAggregation(candidate, gbInfo);
+                }
                 return true;
             }
             return false;
@@ -3029,11 +3055,19 @@ public class PlanAssembler {
         }
 
         ArrayList<AbstractExpression> bindings = new ArrayList<>();
+        // Remember the covered columns.  This might not be
+        // all if we are making do with partial aggregation.
         gbInfo.m_coveredGroupByColumns = calculateGroupbyColumnsCovered(
                 index, fromTableAlias, bindings);
+        // Remember if *all* the group by columns have been covered.
         gbInfo.m_canBeFullySerialized =
                 (gbInfo.m_coveredGroupByColumns.size() ==
                 m_parsedSelect.groupByColumns().size());
+        // If all have been covered, remember the node
+        // whose sort order covers them.
+        if (gbInfo.m_canBeFullySerialized) {
+            gbInfo.m_sortedNode = root;
+        }
     }
 
     /**
@@ -3072,9 +3106,10 @@ public class PlanAssembler {
             gbInfo.m_coveredGroupByColumns = sortColumns.getSecond();
             m_serialAggregationSortIsOrderBySort = true;
         }
-        gbInfo.m_canBeFullySerialized = true;
         OrderByPlanNode orderByNode
                 = buildOrderByPlanNode(groupBySortColumns);
+        gbInfo.m_canBeFullySerialized = true;
+        gbInfo.m_sortedNode = orderByNode;
         orderByNode.addAndLinkChild(root);
         return orderByNode;
     }
@@ -3171,9 +3206,9 @@ public class PlanAssembler {
                 String indexColumnName = indexedColRefs.get(j).getColumn().getName();
 
                 // ignore order of keys in GROUP BY expr
-                int ithCovered = 0;
+                int ithCovered;
                 boolean foundPrefixedColumn = false;
-                for (; ithCovered < groupBys.size(); ithCovered++) {
+                for (ithCovered = 0; ithCovered < groupBys.size(); ithCovered++) {
                     AbstractExpression gbExpr = groupBys.get(ithCovered).expression;
                     if ( ! (gbExpr instanceof TupleValueExpression)) {
                         continue;

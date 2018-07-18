@@ -166,17 +166,20 @@ public class TestPlansLargeQueries extends PlannerTestCase {
         // N,  NP,  N,    N,   1    N    N
         // Nothing to help us here.  We have no indexes and no
         // order bys.
+        // /* << Delete the initial '//' to disable this test.
         validatePlan("select max(aa) from r1_aaidx group by aa",
                      fragSpec(PlanNodeType.SEND,
                               PlanNodeType.PROJECTION,
                               new PlanWithInlineNodes(PlanNodeType.INDEXSCAN,
                                                       PlanNodeType.AGGREGATE,
                                                       PlanNodeType.PROJECTION)));
+        // */
         // PT, GBE  COBE  GBI  JT   DA   DS
         // N,  NP,  N,    N,   1    N    N
         // We have an order by, but it doesn't help us, since
         // the order by expressions and index expressions are
         // incompatible.
+        // /* << Delete the initial '//' to disable this test.
         validatePlan("select max(aa) from r1_aaidx group by id, aa order by aa * aa",
                      fragSpec(PlanNodeType.SEND,
                               PlanNodeType.PROJECTION, // project onto the display list.
@@ -184,24 +187,44 @@ public class TestPlansLargeQueries extends PlannerTestCase {
                               PlanNodeType.AGGREGATE,  // group by
                               PlanNodeType.ORDERBY,    // Order by for serial aggregation.
                               new PlanWithInlineNodes(PlanNodeType.INDEXSCAN, PlanNodeType.PROJECTION)));
+        // */  // Don't change this line.
         // PT, GBE  COBE  GBI  JT   DA   DS
         // N,  NP,  Y,    N,   1    N    N
         // This is like the previous, but with a compatible order by.
         // The order by node is for the order by expressions, but
-        // the group by will use it.
+        // the group by will use it.  Note that the order of
+        // the group by and order by expressions are different.
+        // /* << Delete the initial '//' to disable this test.
         validatePlan("select max(aa) from r1_allidx group by id, aa order by aa, id",
                      fragSpec(PlanNodeType.SEND,
                               PlanNodeType.PROJECTION, // project onto the display list.
                               new PlanWithInlineNodes(PlanNodeType.INDEXSCAN,
                                                       PlanNodeType.AGGREGATE, // group by
                                                       PlanNodeType.PROJECTION)));
+        // */  // Don't change this line.
         // PT, GBE  COBE  GBI  JT   DA   DS
         // N,  NP,  N,    N,   1    N    Y
-        validatePlan("select distinct aa * aa from r1;",
+        // This uses an order by to do serial aggregation for the
+        // distinct.
+        // /* << Delete the initial '//' to disable this test.
+        validatePlan("select distinct aa * aa from r1_aaidx;",
                      fragSpec(PlanNodeType.SEND,
-                              PlanNodeType.AGGREGATE, // distinct
-                              PlanNodeType.ORDERBY,   // distinct
-                              new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
+                              PlanNodeType.AGGREGATE,
+                              PlanNodeType.ORDERBY,
+                              new PlanWithInlineNodes(PlanNodeType.INDEXSCAN,
+                                                      PlanNodeType.PROJECTION)));
+        // */  // Don't change this line.
+        // PT, GBE  COBE  GBI  JT   DA   DS
+        // N,  NP,  N,    N,   1    N    Y
+        // This uses an index by to do serial aggregation for the
+        // distinct.
+        // /* << Delete the initial '//' to disable this test.
+        validatePlan("select distinct aa * aa from r1_aa_sq_idx;",
+                     fragSpec(PlanNodeType.SEND,
+                              new PlanWithInlineNodes(PlanNodeType.INDEXSCAN,
+                                                      PlanNodeType.AGGREGATE,
+                                                      PlanNodeType.PROJECTION)));
+        // */  // Don't change this line.
         // PT, GBE  COBE  GBI  JT   DA   DS
         // N,  NP,  N,    N,   1    N    Y
         // Here the display columns contain all the group by
@@ -209,41 +232,63 @@ public class TestPlansLargeQueries extends PlannerTestCase {
         // should get the same plan as above.  But this
         // time the orderby/aggregate pair is for the
         // group by.
-        validatePlan("select distinct id * id, aa * aa from r1 group by aa * aa, id * id;",
+        // /* << Delete the initial '//' to disable this test.
+        validatePlan("select distinct id * id, aa * aa from r1_aaidx group by aa * aa, id * id;",
                      fragSpec(PlanNodeType.SEND,
                               PlanNodeType.AGGREGATE, // group by grouping
                               PlanNodeType.ORDERBY,   // group by serial aggregation
-                              new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
+                              new PlanWithInlineNodes(PlanNodeType.INDEXSCAN, PlanNodeType.PROJECTION)));
 
+        // */  // Don't change this line.
+        // PT, GBE  COBE  GBI  JT   DA   DS
+        // N,  NP,  N,    N,   1    N    Y
+        // Here the display columns contain all the group by
+        // columns.  So the distinct is not necessary.  We have
+        // an index which can cover all the things we need to
+        // specify order.
+        // /* << Delete the initial '//' to disable this test.
+        validatePlan("select distinct id * id, aa * aa from r1_allidx group by aa * aa, id * id;",
+                     fragSpec(PlanNodeType.SEND,
+                              new PlanWithInlineNodes(PlanNodeType.INDEXSCAN,
+                                                      PlanNodeType.AGGREGATE,
+                                                      PlanNodeType.PROJECTION)));
+
+        // */  // Don't change this line.
         // PT, GBE  COBE  GBI  JT   DA   DS
         // N,  NP,  N,    N,   1    N    Y
         // This has the same profile as above.  But there are
         // order by expressions which can help with the group
         // by.
-        validatePlan("select distinct id * id, aa * aa from r1 "
+        // /* << Delete the initial '//' to disable this test.
+        validatePlan("select distinct id * id, aa * aa from r1_allidx "
                              + "group by aa * aa, id * id "
                              + "order by aa * aa, id * id;",
                      fragSpec(PlanNodeType.SEND,
                               PlanNodeType.ORDERBY,   // order by
-                              PlanNodeType.AGGREGATE, // group by grouping
-                              PlanNodeType.ORDERBY,   // group by serial aggregation
-                              new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
+                              new PlanWithInlineNodes(PlanNodeType.INDEXSCAN,
+                                                      PlanNodeType.AGGREGATE,
+                                                      PlanNodeType.PROJECTION)));
+        // */  // Don't change this line.
         // PT, GBE  COBE  GBI  JT   DA   DS
         // N,  NP,  N,    N,   1    N    Y
         // This has the same profile as above, but it has needs a
         // separate order by node for the distinct, since the group
         // by is not the select expression.
-        validatePlan("select distinct aa * aa from r1 group by aa;",
+        // /* << Delete the initial '//' to disable this test.
+        validatePlan("select distinct aa * aa from r1_allidx group by aa;",
                      fragSpec(PlanNodeType.SEND,
                               PlanNodeType.AGGREGATE, // distinct
                               PlanNodeType.ORDERBY,   // distinct ordering
                               PlanNodeType.PROJECTION,// Project onto the display columns.
-                              PlanNodeType.AGGREGATE, // group by grouping
-                              PlanNodeType.ORDERBY,   // group by order
-                              new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
+                              new PlanWithInlineNodes(PlanNodeType.INDEXSCAN,
+                                                      PlanNodeType.AGGREGATE,
+                                                      PlanNodeType.PROJECTION)));
+        // */  // Don't change this line.
     }
 
-    public void notestPlansPartitioned() {
+    public void testPlansPartitioned() {
+        planForLargeQueries(true);
+
         /////////////////////////////////////////////////////////////////
         //
         // Partitioned tables and indexes.
@@ -253,15 +298,19 @@ public class TestPlansLargeQueries extends PlannerTestCase {
         // N,  NP,  N,    N,   1    N    N
         // Nothing to help us here.  We have no indexes and no
         // order bys.
-        validatePlan("select max(aa) from r1 group by aa",
+        // /* << Delete the initial '//' to disable this test.
+        validatePlan("select max(aa) from p1 group by aa",
                      fragSpec(PlanNodeType.SEND,
                               PlanNodeType.PROJECTION,
                               PlanNodeType.AGGREGATE,  // group by
                               PlanNodeType.ORDERBY,
-                              new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
+                              new PlanWithInlineNodes(PlanNodeType.INDEXSCAN,
+                                                      PlanNodeType.PROJECTION)));
+        // */  // Don't change this line.
         // PT, GBE  COBE  GBI  JT   DA   DS
         // N,  NP,  N,    N,   1    N    N
         // We have an order by, but it doesn't help us, since
+        // /* << Delete the initial '//' to disable this test.
         validatePlan("select max(aa) from r1 group by id, aa order by aa * aa",
                      fragSpec(PlanNodeType.SEND,
                               PlanNodeType.PROJECTION, // project onto the display list.
@@ -269,32 +318,39 @@ public class TestPlansLargeQueries extends PlannerTestCase {
                               PlanNodeType.AGGREGATE,  // group by
                               PlanNodeType.ORDERBY,    // Order by for serial aggregation.
                               new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
+        // */  // Don't change this line.
         // PT, GBE  COBE  GBI  JT   DA   DS
         // N,  NP,  Y,    N,   1    N    N
         // This is like the previous, but with a compatible order by.
         // The order by node is for the order by expressions, but
         // the group by will use it.
+        // /* << Delete the initial '//' to disable this test.
         validatePlan("select max(aa) from r1 group by id, aa order by aa, id",
                      fragSpec(PlanNodeType.SEND,
                               PlanNodeType.PROJECTION, // project onto the display list.
                               PlanNodeType.AGGREGATE,  // group by.
                               PlanNodeType.ORDERBY,    // order by for group and order.
                               new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
+        // */  // Don't change this line.
         // PT, GBE  COBE  GBI  JT   DA   DS
         // N,  NP,  Y,    Y,   1    N    N
+        // /* << Delete the initial '//' to disable this test.
         validatePlan("select max(id) from r1_idpk group by id",
                      fragSpec(PlanNodeType.SEND,
                               PlanNodeType.PROJECTION,
                               new PlanWithInlineNodes(PlanNodeType.INDEXSCAN,
                                                       PlanNodeType.AGGREGATE,
                                                       PlanNodeType.PROJECTION)));
+        // */  // Don't change this line.
         // PT, GBE  COBE  GBI  JT   DA   DS
         // N,  NP,  N,    N,   1    N    Y
+        // /* << Delete the initial '//' to disable this test.
         validatePlan("select distinct aa * aa from r1;",
                      fragSpec(PlanNodeType.SEND,
                               PlanNodeType.AGGREGATE, // distinct
                               PlanNodeType.ORDERBY,   // distinct
                               new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
+        // */  // Don't change this line.
         // PT, GBE  COBE  GBI  JT   DA   DS
         // N,  NP,  N,    N,   1    N    Y
         // Here the display columns contain all the group by
@@ -302,17 +358,20 @@ public class TestPlansLargeQueries extends PlannerTestCase {
         // should get the same plan as above.  But this
         // time the orderby/aggregate pair is for the
         // group by.
+        // /* << Delete the initial '//' to disable this test.
         validatePlan("select distinct id * id, aa * aa from r1 group by aa * aa, id * id;",
                      fragSpec(PlanNodeType.SEND,
                               PlanNodeType.AGGREGATE, // group by grouping
                               PlanNodeType.ORDERBY,   // group by serial aggregation
                               new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
 
+        // */  // Don't change this line.
         // PT, GBE  COBE  GBI  JT   DA   DS
         // N,  NP,  N,    N,   1    N    Y
         // This has the same profile as above.  But there are
         // order by expressions which can help with the group
         // by.
+        // /* << Delete the initial '//' to disable this test.
         validatePlan("select distinct id * id, aa * aa from r1 "
                              + "group by aa * aa, id * id "
                              + "order by aa * aa, id * id;",
@@ -321,11 +380,13 @@ public class TestPlansLargeQueries extends PlannerTestCase {
                               PlanNodeType.AGGREGATE, // group by grouping
                               PlanNodeType.ORDERBY,   // group by serial aggregation
                               new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
+        // */  // Don't change this line.
         // PT, GBE  COBE  GBI  JT   DA   DS
         // N,  NP,  N,    N,   1    N    Y
         // This has the same profile as above, but it has needs a
         // separate order by node for the distinct, since the group
         // by is not the select expression.
+        // /* << Delete the initial '//' to disable this test.
         validatePlan("select distinct aa * aa from r1 group by aa;",
                      fragSpec(PlanNodeType.SEND,
                               PlanNodeType.AGGREGATE, // distinct
@@ -334,7 +395,7 @@ public class TestPlansLargeQueries extends PlannerTestCase {
                               PlanNodeType.AGGREGATE, // group by grouping
                               PlanNodeType.ORDERBY,   // group by order
                               new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
-
+        // */  // Don't change this line.
     }
 
 
