@@ -221,7 +221,7 @@ public class EEPlanGenerator extends PlannerTestCase {
     //
     private String m_testNamesFile;
 
-    protected String getPlanString(String sqlStmt, int fragmentNumber, boolean isLargeQuery) throws JSONException {
+    protected String getPlanString(String sqlStmt, int fragmentNumber, boolean isLargeQuery) {
         boolean planForSinglePartition = (fragmentNumber == 0);
         List<AbstractPlanNode> nodes = compileToFragments(sqlStmt, planForSinglePartition);
         if (nodes.size() <= fragmentNumber) {
@@ -229,8 +229,7 @@ public class EEPlanGenerator extends PlannerTestCase {
                                                            fragmentNumber,
                                                            nodes.size()));
         }
-        String planString = PlanSelector.outputPlanDebugString(nodes.get(fragmentNumber), isLargeQuery);
-        return planString;
+        return nodes.get(fragmentNumber).toJSONExplainString(isLargeQuery);
     }
 
     /**

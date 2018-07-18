@@ -271,9 +271,9 @@ public class PlanSelector implements Cloneable {
         // convert a tree into an execution list
         PlanNodeList nodeList = new PlanNodeList(planGraph, plan.getIsLargeQuery());
 
-        String json;
+        String jsonPlan = null;
         try {
-            json = outputPlanDebugString(planGraph, plan.getIsLargeQuery());
+            jsonPlan = planGraph.toJSONExplainStringUnsafe(plan.getIsLargeQuery());
         } catch (JSONException e2) {
             // Any plan that can't be serialized to JSON to
             // write to debugging output is also going to fail
@@ -287,15 +287,22 @@ public class PlanSelector implements Cloneable {
             return errorMsg;
         }
         // output a description of the parsed stmt
-        json = "PLAN:\n" + json;
-        json = "COST: " + String.valueOf(plan.cost) + "\n" + json;
+        StringBuilder sb = new StringBuilder();
         assert (plan.sql != null);
-        json = "SQL: " + plan.sql + "\n" + json;
+        sb.append("SQL: ")
+                .append(plan.sql)
+                .append("\n")
+                .append("PLAN: \n")
+                .append(jsonPlan)
+                .append("\n")
+                .append("COST: ")
+                .append(String.valueOf(plan.cost))
+                .append("\n");
 
         // write json to disk
         BuildDirectoryUtils.writeFile("statement-all-plans/" + m_procName + "_" + m_stmtName,
                                       filename + "-json.txt",
-                                      json,
+                                      sb.toString(),
                                       true);
 
         // create a graph friendly version

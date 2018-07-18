@@ -1023,11 +1023,7 @@ public class PlannerTestCase extends TestCase {
     }
 
     private void printJSONString(AbstractPlanNode node) {
-        try {
-            String jsonString = PlanSelector.outputPlanDebugString(node, m_aide.m_planForLargeQueries);
-            System.out.printf("Json:\n%s\n", jsonString);
-        } catch (Exception ex) {
-            ex.printStackTrace();
-        }
+        String jsonString = node.toJSONExplainString(m_aide.m_planForLargeQueries);
+        System.out.printf("Json:\n%s\n", jsonString);
     }
 }

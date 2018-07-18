@@ -81,28 +81,18 @@ public class MicroOptimizationRunner {
             }
         }
         for (MicroOptimization opt : opts) {
+            String planStringJSON = null;
             if (m_logger.isDebugEnabled()) {
-                String planString = null;
-                try {
-                    planString = PlanSelector.outputPlanDebugString(plan.rootPlanGraph, plan.getIsLargeQuery());
-                } catch (JSONException ex) {
-                    planString = ex.getMessage();
-                }
+                planStringJSON = plan.rootPlanGraph.toJSONExplainString(plan.getIsLargeQuery());
                 m_logger.debug("Microoptimization: " + opt + "\n"
                            + "Input:\n" + plan.explainedPlan + "\n"
                            + ":-----------:\n"
-                           + planString
+                           + planStringJSON
                            + "\n");
             }
             opt.apply(plan, parsedStmt);
             if (m_logger.isDebugEnabled()) {
-                String planString = null;
-                try {
-                    planString = PlanSelector.outputPlanDebugString(plan.rootPlanGraph, plan.getIsLargeQuery());
-                } catch (JSONException ex) {
-                    planString = ex.getMessage();
-                }
-                m_logger.debug("Output:\n" + planString + "\n");
+                m_logger.debug("Output:\n" + planStringJSON + "\n");
             }
         }
     }
