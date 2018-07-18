@@ -66,11 +66,187 @@ public class TestPlansLargeQueries extends PlannerTestCase {
     //
     /////////////////////////////////////////////////////////////////
 
-    public void testPlansReplicated() {
+    public void testPlansReplicatedNoIndex() {
         planForLargeQueries(true);
         /////////////////////////////////////////////////////////////////
         //
         // Replicated tables and indexes.
+        //
+        /////////////////////////////////////////////////////////////////
+        // PT, GBE  COBE  GBI  JT   DA   DS
+        // N,  NP,  N,    N,   1    N    N
+        // Nothing to help us here.  We have no indexes and no
+        // order bys.
+        validatePlan("select max(aa) from r1 group by aa",
+                     fragSpec(PlanNodeType.SEND,
+                              PlanNodeType.PROJECTION,
+                              PlanNodeType.AGGREGATE,  // group by
+                              PlanNodeType.ORDERBY,
+                              new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
+        // PT, GBE  COBE  GBI  JT   DA   DS
+        // N,  NP,  N,    N,   1    N    N
+        // We have an order by, but it doesn't help us, since
+        // the index and order by expressions are incompatible.
+        validatePlan("select max(aa) from r1 group by id, aa order by aa * aa",
+                     fragSpec(PlanNodeType.SEND,
+                              PlanNodeType.PROJECTION, // project onto the display list.
+                              PlanNodeType.ORDERBY,    // order by aa * aa
+                              PlanNodeType.AGGREGATE,  // group by
+                              PlanNodeType.ORDERBY,    // Order by for serial aggregation.
+                              new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
+        // PT, GBE  COBE  GBI  JT   DA   DS
+        // N,  NP,  Y,    N,   1    N    N
+        // This is like the previous, but with a compatible order by.
+        // The order by node is for the order by expressions, but
+        // the group by will use it.  Note that the group by and
+        // order by columns are not in the same order.
+        validatePlan("select max(aa) from r1 group by id, aa order by aa, id",
+                     fragSpec(PlanNodeType.SEND,
+                              PlanNodeType.PROJECTION, // project onto the display list.
+                              PlanNodeType.AGGREGATE,  // group by.
+                              PlanNodeType.ORDERBY,    // order by for group and order.
+                              new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
+        // PT, GBE  COBE  GBI  JT   DA   DS
+        // N,  N,   N,    N,   1    N    Y
+        // Here we have an index on the distinct select expression.
+        validatePlan("select distinct aa * aa from r1;",
+                     fragSpec(PlanNodeType.SEND,
+                              PlanNodeType.AGGREGATE, // distinct
+                              PlanNodeType.ORDERBY,   // distinct
+                              new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
+        // PT, GBE  COBE  GBI  JT   DA   DS
+        // N,  NP,  N,    N,   1    N    Y
+        // Here the display columns contain all the group by
+        // columns.  So the distinct is not necessary, and we
+        // should get the same plan as above.  But this
+        // time the orderby/aggregate pair is for the
+        // group by.
+        validatePlan("select distinct id * id, aa * aa from r1 group by aa * aa, id * id;",
+                     fragSpec(PlanNodeType.SEND,
+                              PlanNodeType.AGGREGATE, // group by grouping
+                              PlanNodeType.ORDERBY,   // group by serial aggregation
+                              new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
+
+        // PT, GBE  COBE  GBI  JT   DA   DS
+        // N,  NP,  N,    N,   1    N    Y
+        // This has the same profile as above.  But there are
+        // order by expressions which can help with the group
+        // by.
+        validatePlan("select distinct id * id, aa * aa from r1 "
+                             + "group by aa * aa, id * id "
+                             + "order by aa * aa, id * id;",
+                     fragSpec(PlanNodeType.SEND,
+                              PlanNodeType.ORDERBY,   // order by
+                              PlanNodeType.AGGREGATE, // group by grouping
+                              PlanNodeType.ORDERBY,   // group by serial aggregation
+                              new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
+        // PT, GBE  COBE  GBI  JT   DA   DS
+        // N,  NP,  N,    N,   1    N    Y
+        // This has the same profile as above, but it has needs a
+        // separate order by node for the distinct, since the group
+        // by is not the select expression.
+        validatePlan("select distinct aa * aa from r1 group by aa;",
+                     fragSpec(PlanNodeType.SEND,
+                              PlanNodeType.AGGREGATE, // distinct
+                              PlanNodeType.ORDERBY,   // distinct ordering
+                              PlanNodeType.PROJECTION,// Project onto the display columns.
+                              PlanNodeType.AGGREGATE, // group by grouping
+                              PlanNodeType.ORDERBY,   // group by order
+                              new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
+    }
+
+    public void testPlansReplicatedGroupByIndex() {
+        planForLargeQueries(true);
+        /////////////////////////////////////////////////////////////////
+        //
+        // Replicated tables and indexes.
+        //
+        /////////////////////////////////////////////////////////////////
+        // PT, GBE  COBE  GBI  JT   DA   DS
+        // N,  NP,  N,    N,   1    N    N
+        // Nothing to help us here.  We have no indexes and no
+        // order bys.
+        validatePlan("select max(aa) from r1_aaidx group by aa",
+                     fragSpec(PlanNodeType.SEND,
+                              PlanNodeType.PROJECTION,
+                              new PlanWithInlineNodes(PlanNodeType.INDEXSCAN,
+                                                      PlanNodeType.AGGREGATE,
+                                                      PlanNodeType.PROJECTION)));
+        // PT, GBE  COBE  GBI  JT   DA   DS
+        // N,  NP,  N,    N,   1    N    N
+        // We have an order by, but it doesn't help us, since
+        // the order by expressions and index expressions are
+        // incompatible.
+        validatePlan("select max(aa) from r1_aaidx group by id, aa order by aa * aa",
+                     fragSpec(PlanNodeType.SEND,
+                              PlanNodeType.PROJECTION, // project onto the display list.
+                              PlanNodeType.ORDERBY,    // order by aa * aa
+                              PlanNodeType.AGGREGATE,  // group by
+                              PlanNodeType.ORDERBY,    // Order by for serial aggregation.
+                              new PlanWithInlineNodes(PlanNodeType.INDEXSCAN, PlanNodeType.PROJECTION)));
+        // PT, GBE  COBE  GBI  JT   DA   DS
+        // N,  NP,  Y,    N,   1    N    N
+        // This is like the previous, but with a compatible order by.
+        // The order by node is for the order by expressions, but
+        // the group by will use it.
+        validatePlan("select max(aa) from r1_allidx group by id, aa order by aa, id",
+                     fragSpec(PlanNodeType.SEND,
+                              PlanNodeType.PROJECTION, // project onto the display list.
+                              new PlanWithInlineNodes(PlanNodeType.INDEXSCAN,
+                                                      PlanNodeType.AGGREGATE, // group by
+                                                      PlanNodeType.PROJECTION)));
+        // PT, GBE  COBE  GBI  JT   DA   DS
+        // N,  NP,  N,    N,   1    N    Y
+        validatePlan("select distinct aa * aa from r1;",
+                     fragSpec(PlanNodeType.SEND,
+                              PlanNodeType.AGGREGATE, // distinct
+                              PlanNodeType.ORDERBY,   // distinct
+                              new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
+        // PT, GBE  COBE  GBI  JT   DA   DS
+        // N,  NP,  N,    N,   1    N    Y
+        // Here the display columns contain all the group by
+        // columns.  So the distinct is not necessary, and we
+        // should get the same plan as above.  But this
+        // time the orderby/aggregate pair is for the
+        // group by.
+        validatePlan("select distinct id * id, aa * aa from r1 group by aa * aa, id * id;",
+                     fragSpec(PlanNodeType.SEND,
+                              PlanNodeType.AGGREGATE, // group by grouping
+                              PlanNodeType.ORDERBY,   // group by serial aggregation
+                              new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
+
+        // PT, GBE  COBE  GBI  JT   DA   DS
+        // N,  NP,  N,    N,   1    N    Y
+        // This has the same profile as above.  But there are
+        // order by expressions which can help with the group
+        // by.
+        validatePlan("select distinct id * id, aa * aa from r1 "
+                             + "group by aa * aa, id * id "
+                             + "order by aa * aa, id * id;",
+                     fragSpec(PlanNodeType.SEND,
+                              PlanNodeType.ORDERBY,   // order by
+                              PlanNodeType.AGGREGATE, // group by grouping
+                              PlanNodeType.ORDERBY,   // group by serial aggregation
+                              new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
+        // PT, GBE  COBE  GBI  JT   DA   DS
+        // N,  NP,  N,    N,   1    N    Y
+        // This has the same profile as above, but it has needs a
+        // separate order by node for the distinct, since the group
+        // by is not the select expression.
+        validatePlan("select distinct aa * aa from r1 group by aa;",
+                     fragSpec(PlanNodeType.SEND,
+                              PlanNodeType.AGGREGATE, // distinct
+                              PlanNodeType.ORDERBY,   // distinct ordering
+                              PlanNodeType.PROJECTION,// Project onto the display columns.
+                              PlanNodeType.AGGREGATE, // group by grouping
+                              PlanNodeType.ORDERBY,   // group by order
+                              new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
+    }
+
+    public void notestPlansPartitioned() {
+        /////////////////////////////////////////////////////////////////
+        //
+        // Partitioned tables and indexes.
         //
         /////////////////////////////////////////////////////////////////
         // PT, GBE  COBE  GBI  JT   DA   DS
@@ -138,15 +314,18 @@ public class TestPlansLargeQueries extends PlannerTestCase {
         // order by expressions which can help with the group
         // by.
         validatePlan("select distinct id * id, aa * aa from r1 "
-                     + "group by aa * aa, id * id "
-                     + "order by aa * aa, id * id;",
+                             + "group by aa * aa, id * id "
+                             + "order by aa * aa, id * id;",
                      fragSpec(PlanNodeType.SEND,
                               PlanNodeType.ORDERBY,   // order by
                               PlanNodeType.AGGREGATE, // group by grouping
                               PlanNodeType.ORDERBY,   // group by serial aggregation
                               new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
-        // GBE  COBE  GBI  PT   JT   DA   DS
-        // R,   N,    N,   N,    1   N    Y
+        // PT, GBE  COBE  GBI  JT   DA   DS
+        // N,  NP,  N,    N,   1    N    Y
+        // This has the same profile as above, but it has needs a
+        // separate order by node for the distinct, since the group
+        // by is not the select expression.
         validatePlan("select distinct aa * aa from r1 group by aa;",
                      fragSpec(PlanNodeType.SEND,
                               PlanNodeType.AGGREGATE, // distinct
@@ -155,6 +334,7 @@ public class TestPlansLargeQueries extends PlannerTestCase {
                               PlanNodeType.AGGREGATE, // group by grouping
                               PlanNodeType.ORDERBY,   // group by order
                               new PlanWithInlineNodes(PlanNodeType.SEQSCAN, PlanNodeType.PROJECTION)));
+
     }
 
 

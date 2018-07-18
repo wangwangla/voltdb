@@ -3067,13 +3067,12 @@ public class PlanAssembler {
             }
             m_serialAggregationSortIsOrderBySort = false;
             gbInfo.m_coveredGroupByColumns = groupBySortColumnPermutation;
-            gbInfo.m_canBeFullySerialized = true;
         } else {
             groupBySortColumns = sortColumns.getFirst();
             gbInfo.m_coveredGroupByColumns = sortColumns.getSecond();
             m_serialAggregationSortIsOrderBySort = true;
-            gbInfo.m_canBeFullySerialized = true;
         }
+        gbInfo.m_canBeFullySerialized = true;
         OrderByPlanNode orderByNode
                 = buildOrderByPlanNode(groupBySortColumns);
         orderByNode.addAndLinkChild(root);
@@ -3133,7 +3132,13 @@ public class PlanAssembler {
                 }
             }
         }
-        if (pickedUpIndex == null) {
+        // If we didn't find a useful index, either
+        // because we didn't find any or else the index
+        // we found didn't cover all the group by columns,
+        // and this is a large query, then add an order
+        // by node.
+        if (pickedUpIndex == null
+                || (m_isLargeQuery && !foundAllGroupByCoveredIndex)) {
             // Add an order by if necessary for forced serial aggregation.
             if (m_parsedSelect != null && m_isLargeQuery) {
                 return addOrderByForSerialAggregation(root, gbInfo);

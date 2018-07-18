@@ -14,6 +14,12 @@ create table r1_aaidx (
 );
 create index index_r1_aaidx on r1_aaidx (aa);
 
+create table r1_aa_sq_idx (
+    id  bigint not null primary key,
+    aa  bigint not null
+);
+create index index_r1_aa_sq_idx on r1_aaidx (aa * aa);
+
 create table r1_allidx (
     id  bigint not null primary key,
     aa  bigint not null
