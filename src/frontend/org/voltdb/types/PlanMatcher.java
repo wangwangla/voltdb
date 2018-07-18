@@ -31,5 +31,5 @@ public interface PlanMatcher {
      * @param node
      * @return
      */
-    String match(AbstractPlanNode node);
+    String match(AbstractPlanNode node, int fragmentNo, int numFragments);
 }

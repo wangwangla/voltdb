@@ -643,10 +643,13 @@ public class TestUnion extends PlannerTestCase {
                                       // to have the lambda be statically defined
                                       // in PlannerTestCase.  But this works better
                                       // as an example.
-                                    (node) -> {
+                                    (node, fragmentNo, numFragments) -> {
                                         OrderByPlanNode obpn = (OrderByPlanNode)node;
                                         if (obpn.getSortDirections().get(0) != SortDirectionType.ASC) {
-                                            return "Expected ascending order by node.";
+                                            return String.format("Expected ascending order by node %d/%d, id %d.",
+                                                                 fragmentNo,
+                                                                 numFragments,
+                                                                 obpn.getPlanNodeId());
                                         }
                                         return null;
                                     }),

@@ -2542,12 +2542,19 @@ public class PlanAssembler {
                     !gbInfo.m_coveredGroupByColumns.isEmpty()) {
                 // The candidate index does cover all or some
                 // of the GROUP BY columns and can be serialized.
+                // This will be partial serialization, which we
+                // can't have for large temp table queries.
                 gbInfo.m_sortedNode = candidate;
                 return true;
             }
-            // For LTT queries, we always need to force serial
-            // aggregation.  We do this by inserting an order by
-            // node if necessary.
+            // So here we have either a large temp table query
+            // or else nothing from the index helps us with
+            // group by expressions.
+            //   o For LTT queries, we always need to force serial
+            //     aggregation.  We do this by inserting an order by
+            //     node if necessary.
+            //   o For normal queries we don't care.  We will just
+            //     do hash aggregation.
             if (m_isLargeQuery) {
                 // If we have not changed to a serial aggregate, then
                 // we need to here.
@@ -2556,11 +2563,16 @@ public class PlanAssembler {
                 }
                 return true;
             }
+            //
+            // Index scan node doesn't help.  Do hash aggregation.
             return false;
         }
 
         AbstractPlanNode sourceSeqScan = findSeqScanCandidateForGroupBy(candidate);
         if (sourceSeqScan == null) {
+            // I don't completely understand how this
+            // can happen.  But it's a disaster for LTT queries.
+            assert( ! m_isLargeQuery );
             return false;
         }
         assert(sourceSeqScan instanceof SeqScanPlanNode);
@@ -2575,10 +2587,14 @@ public class PlanAssembler {
         switch (sortedAccessNode.getPlanNodeType()) {
             case INDEXSCAN:
             case ORDERBY:
-                // found way to sort for sequential scan
+                // found way to sort for sequential scan.
+                // This is obscure.
                 gbInfo.m_sortedNode = sortedAccessNode;
                 break;
             default:
+                // If this is an LTT query returning
+                // false is a disaster.
+                assert( ! m_isLargeQuery );
                 return false;
         }
 
@@ -2588,10 +2604,7 @@ public class PlanAssembler {
             sortedAccessNode.clearParents();
             // For two children join node, index 0 is its outer side
             parent.replaceChild(0, sortedAccessNode);
-
-            return false;
         }
-
         // parent is null and switched to sorted scan from sequential scan
         return true;
     }
@@ -3120,7 +3133,7 @@ public class PlanAssembler {
     // as the type shows.  We rummage around to find an index.  If
     // one of them is useful we are done.  If none are useful and
     // this is a large temp table query we must add an order by node
-    // on the type of root and return that.
+    // on top of root and return that.
     private AbstractPlanNode indexAccessForGroupByExprs(SeqScanPlanNode root,
             GroupByOrderInfo gbInfo) {
         if (! root.isPersistentTableScan()) {

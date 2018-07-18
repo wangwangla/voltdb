@@ -302,6 +302,9 @@ public class TestPlansLargeQueries extends PlannerTestCase {
         validatePlan("select max(aa) from p1 group by aa",
                      fragSpec(PlanNodeType.SEND,
                               PlanNodeType.PROJECTION,
+                              PlanNodeType.AGGREGATE,
+                              PlanNodeType.RECEIVE),
+                     fragSpec(PlanNodeType.SEND,
                               PlanNodeType.AGGREGATE,  // group by
                               PlanNodeType.ORDERBY,
                               new PlanWithInlineNodes(PlanNodeType.INDEXSCAN,
@@ -310,7 +313,7 @@ public class TestPlansLargeQueries extends PlannerTestCase {
         // PT, GBE  COBE  GBI  JT   DA   DS
         // N,  NP,  N,    N,   1    N    N
         // We have an order by, but it doesn't help us, since
-        // /* << Delete the initial '//' to disable this test.
+        /* << Delete the initial '//' to disable this test.
         validatePlan("select max(aa) from r1 group by id, aa order by aa * aa",
                      fragSpec(PlanNodeType.SEND,
                               PlanNodeType.PROJECTION, // project onto the display list.
@@ -324,7 +327,7 @@ public class TestPlansLargeQueries extends PlannerTestCase {
         // This is like the previous, but with a compatible order by.
         // The order by node is for the order by expressions, but
         // the group by will use it.
-        // /* << Delete the initial '//' to disable this test.
+        /* << Delete the initial '//' to disable this test.
         validatePlan("select max(aa) from r1 group by id, aa order by aa, id",
                      fragSpec(PlanNodeType.SEND,
                               PlanNodeType.PROJECTION, // project onto the display list.
@@ -334,7 +337,7 @@ public class TestPlansLargeQueries extends PlannerTestCase {
         // */  // Don't change this line.
         // PT, GBE  COBE  GBI  JT   DA   DS
         // N,  NP,  Y,    Y,   1    N    N
-        // /* << Delete the initial '//' to disable this test.
+        /* << Delete the initial '//' to disable this test.
         validatePlan("select max(id) from r1_idpk group by id",
                      fragSpec(PlanNodeType.SEND,
                               PlanNodeType.PROJECTION,
@@ -344,7 +347,7 @@ public class TestPlansLargeQueries extends PlannerTestCase {
         // */  // Don't change this line.
         // PT, GBE  COBE  GBI  JT   DA   DS
         // N,  NP,  N,    N,   1    N    Y
-        // /* << Delete the initial '//' to disable this test.
+        /* << Delete the initial '//' to disable this test.
         validatePlan("select distinct aa * aa from r1;",
                      fragSpec(PlanNodeType.SEND,
                               PlanNodeType.AGGREGATE, // distinct
@@ -358,7 +361,7 @@ public class TestPlansLargeQueries extends PlannerTestCase {
         // should get the same plan as above.  But this
         // time the orderby/aggregate pair is for the
         // group by.
-        // /* << Delete the initial '//' to disable this test.
+        /* << Delete the initial '//' to disable this test.
         validatePlan("select distinct id * id, aa * aa from r1 group by aa * aa, id * id;",
                      fragSpec(PlanNodeType.SEND,
                               PlanNodeType.AGGREGATE, // group by grouping
@@ -371,7 +374,7 @@ public class TestPlansLargeQueries extends PlannerTestCase {
         // This has the same profile as above.  But there are
         // order by expressions which can help with the group
         // by.
-        // /* << Delete the initial '//' to disable this test.
+        /* << Delete the initial '//' to disable this test.
         validatePlan("select distinct id * id, aa * aa from r1 "
                              + "group by aa * aa, id * id "
                              + "order by aa * aa, id * id;",
@@ -386,7 +389,7 @@ public class TestPlansLargeQueries extends PlannerTestCase {
         // This has the same profile as above, but it has needs a
         // separate order by node for the distinct, since the group
         // by is not the select expression.
-        // /* << Delete the initial '//' to disable this test.
+        /* << Delete the initial '//' to disable this test.
         validatePlan("select distinct aa * aa from r1 group by aa;",
                      fragSpec(PlanNodeType.SEND,
                               PlanNodeType.AGGREGATE, // distinct
