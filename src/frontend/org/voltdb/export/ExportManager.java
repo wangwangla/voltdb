@@ -233,10 +233,10 @@ public class ExportManager
 
     /**
      * Indicate to associated {@link ExportGeneration}s to
-     * prepare give up mastership for the given partition id
+     * prepare give up mastership for the given partition id to hostId
      * @param partitionId
      */
-    synchronized public void prepareUnacceptMastership(int partitionId) {
+    synchronized public void prepareTransferMastership(int partitionId, int hostId) {
         // ignore if mastership for partition id is not on this host
         if (!m_masterOfPartitions.contains(partitionId)) {
             return;
@@ -248,7 +248,7 @@ public class ExportManager
         if (generation == null) {
             return;
         }
-        generation.prepareUnacceptMastership(partitionId);
+        generation.prepareTransferMastership(partitionId, hostId);
     }
 
     synchronized public void removeMasterPartition(int partitionId) {
