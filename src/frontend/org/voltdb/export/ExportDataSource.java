@@ -87,11 +87,11 @@ public class ExportDataSource implements Comparable<ExportDataSource> {
     // Relinquishes export master after this uso
     private long m_usoToDrain = -1L;
     // EDS that will be demoted soon
-    private boolean m_retiredMaster = false;
+    private boolean m_retiringMaster = false;
     // EDS that will be promoted as export master soon
     private boolean m_wannabeMaster = false;
     // This flag indicates there is no export master for the stream
-    private boolean m_anarchy = false;
+    private boolean m_noExportMaster = false;
     //This is released when all mailboxes are set.
     private final Semaphore m_allowAcceptingMastership = new Semaphore(0);
     // This EDS is export master when the flag set to true
@@ -892,13 +892,13 @@ public class ExportDataSource implements Comparable<ExportDataSource> {
                 return;
             }
             // Current master sends migrate event to all export replicas
-            if (m_retiredMaster && uso >= m_usoToDrain) {
+            if (m_retiringMaster && uso >= m_usoToDrain) {
                 unacceptMastership();
                 m_generation.migrateDataSource(this);
             }
-            // Receiving a ACK means new master is promoted, clear the anarchy state
-            if (m_anarchy && uso >= m_usoToDrain) {
-                m_anarchy = false;
+            // Receiving a ACK means new master is promoted, clear the noExportMaster state
+            if (m_noExportMaster && uso >= m_usoToDrain) {
+                m_noExportMaster = false;
                 m_usoToDrain = -1L;
             }
         }
@@ -921,7 +921,7 @@ public class ExportDataSource implements Comparable<ExportDataSource> {
                 if (exportLog.isDebugEnabled()) {
                     exportLog.debug("Export table " + getTableName() + " mastership prepare to be demoted for partition " + getPartitionId());
                 }
-                m_retiredMaster = true;
+                m_retiringMaster = true;
                 // memorize end USO of the most recently pushed buffer from EE
                 m_usoToDrain = m_lastPushedUso;
                 // if no new buffer to be drained, send the migrate event right away
@@ -943,8 +943,8 @@ public class ExportDataSource implements Comparable<ExportDataSource> {
         m_isInCatalog = false;
         m_eos = false;
         m_usoToDrain = -1L;
-        m_anarchy = true;
-        m_retiredMaster = false;
+        m_noExportMaster = true;
+        m_retiringMaster = false;
         // For case where the previous export processor had only row of the first block to process
         // and it completed processing it, poll future is not set to null still. Set it to null to
         // prepare for the new processor polling
@@ -965,8 +965,8 @@ public class ExportDataSource implements Comparable<ExportDataSource> {
                     exportLog.debug("Export table " + getTableName() + " mastership prepare to be promoted for partition " + getPartitionId());
                 }
                 m_wannabeMaster = true;
-                // If in anarchy state, promote master right away
-                if (m_anarchy) {
+                // If in noExportMaster state, promote master right away
+                if (m_noExportMaster) {
                     acceptMastership();
                 }
             }
@@ -1057,7 +1057,7 @@ public class ExportDataSource implements Comparable<ExportDataSource> {
     }
 
     public boolean streamHasNoMaster() {
-        return m_anarchy;
+        return m_noExportMaster;
     }
 
     public byte[] getTableSignature() {
@@ -1066,9 +1066,9 @@ public class ExportDataSource implements Comparable<ExportDataSource> {
     public long getLastReleaseUso() {
         return m_lastReleaseUso;
     }
-    // Anarchy state will be cleared when replicas receive ACK message equals or greater than m_usoToDrain
+    // NoMaster state will be cleared when replicas receive ACK message equals or greater than m_usoToDrain
     public void markStreamHasNoMaster(long uso) {
-        m_anarchy = true;
+        m_noExportMaster = true;
         m_usoToDrain = uso;
     }
 
