@@ -87,7 +87,7 @@ public class ExportManager
 
     public static final byte RELEASE_BUFFER = 1;
 
-    public static final byte MIGRATE_MASTER = 2;
+    public static final byte TAKE_MASTERSHIP = 2;
 
     /**
      * Thrown if the initial setup of the loader fails
@@ -203,11 +203,6 @@ public class ExportManager
         if (exportLog.isDebugEnabled()) {
             exportLog.debug("Export Manager has been notified that local partition " + partitionId + " has became leader.");
         }
-        ExportGeneration generation = m_generation.get();
-        if (generation == null) {
-            return;
-        }
-        generation.prepareAcceptMastership(partitionId);
     }
 
     /**
@@ -237,10 +232,10 @@ public class ExportManager
      * @param partitionId
      */
     synchronized public void prepareTransferMastership(int partitionId, int hostId) {
-        // ignore if mastership for partition id is not on this host
-        if (!m_masterOfPartitions.contains(partitionId)) {
-            return;
-        }
+        // remove mastership for partition id, so when failure happen during the mastership transfer
+        // this node can be elected as new master again.
+        m_masterOfPartitions.remove(partitionId);
+
         if (exportLog.isDebugEnabled()) {
             exportLog.debug("ExportManager has been notified the sp leader for " + partitionId + " has been migrated away");
         }
@@ -249,10 +244,6 @@ public class ExportManager
             return;
         }
         generation.prepareTransferMastership(partitionId, hostId);
-    }
-
-    synchronized public void removeMasterPartition(int partitionId) {
-        m_masterOfPartitions.remove(partitionId);
     }
 
     /**
@@ -401,7 +392,7 @@ public class ExportManager
             m_processor.set(newProcessor);
 
             File exportOverflowDirectory = new File(VoltDB.instance().getExportOverflowPath());
-            ExportGeneration generation = new ExportGeneration(exportOverflowDirectory, this);
+            ExportGeneration generation = new ExportGeneration(exportOverflowDirectory);
             generation.initialize(m_messenger, m_hostId, catalogContext, connectors, partitions, exportOverflowDirectory);
 
             m_generation.set(generation);
@@ -445,7 +436,7 @@ public class ExportManager
         if (m_generation.get() == null) {
             File exportOverflowDirectory = new File(VoltDB.instance().getExportOverflowPath());
             try {
-                ExportGeneration gen = new ExportGeneration(exportOverflowDirectory, this);
+                ExportGeneration gen = new ExportGeneration(exportOverflowDirectory);
                 m_generation.set(gen);
             } catch (IOException crash) {
                 //This means durig UAC we had a bad disk on a node or bad directory.
