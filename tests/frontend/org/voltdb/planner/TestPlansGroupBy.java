@@ -44,10 +44,13 @@ import org.voltdb.plannodes.SchemaColumn;
 import org.voltdb.plannodes.SendPlanNode;
 import org.voltdb.plannodes.SeqScanPlanNode;
 import org.voltdb.types.ExpressionType;
+import org.voltdb.types.PlanMatcher;
 import org.voltdb.types.PlanNodeType;
 import org.voltdb.types.SortDirectionType;
 
 public class TestPlansGroupBy extends PlannerTestCase {
+    // Set this to true to print the JSON string for the plan.
+    private static boolean PRINT_JSON_PLAN = true;
     @Override
     protected void setUp() throws Exception {
         setupSchema(TestPlansGroupBy.class.getResource("testplans-groupby-ddl.sql"),
@@ -79,18 +82,13 @@ public class TestPlansGroupBy extends PlannerTestCase {
     }
 
     private void checkSimpleTableInlineAgg(String sql) {
-        AbstractPlanNode p;
-        List<AbstractPlanNode> pns;
-
-        pns = compileToFragments(sql);
-        p = pns.get(0).getChild(0);
-        assertTrue(p instanceof AggregatePlanNode);
-        assertTrue(p.getChild(0) instanceof ReceivePlanNode);
-
-        p = pns.get(1).getChild(0);
-        assertTrue(p instanceof AbstractScanPlanNode);
-        assertNotNull(p.getInlinePlanNode(PlanNodeType.PROJECTION));
-        assertNotNull(p.getInlinePlanNode(PlanNodeType.AGGREGATE));
+        validatePlan(sql,
+                     PRINT_JSON_PLAN,
+                     fragSpec(PlanNodeType.SEND,
+                              PlanNodeType.AGGREGATE,
+                              PlanNodeType.RECEIVE),
+                     fragSpec(PlanNodeType.SEND,
+                              AbstractScanPlanNodeMatcher));
     }
 
     // AVG is optimized with SUM / COUNT, generating extra projection node
@@ -99,17 +97,16 @@ public class TestPlansGroupBy extends PlannerTestCase {
       AbstractPlanNode p;
       List<AbstractPlanNode> pns;
 
-      pns = compileToFragments("SELECT AVG(A1) from T1");
-      //* enable to debug */ printExplainPlan(pns);
-      p = pns.get(0).getChild(0);
-      assertTrue(p instanceof ProjectionPlanNode);
-      assertTrue(p.getChild(0) instanceof AggregatePlanNode);
-      assertTrue(p.getChild(0).getChild(0) instanceof ReceivePlanNode);
-
-      p = pns.get(1).getChild(0);
-      assertTrue(p instanceof SeqScanPlanNode);
-      assertNotNull(p.getInlinePlanNode(PlanNodeType.PROJECTION));
-      assertNotNull(p.getInlinePlanNode(PlanNodeType.AGGREGATE));
+      validatePlan("SELECT AVG(A1) from T1",
+                   PRINT_JSON_PLAN,
+                   fragSpec(PlanNodeType.SEND,
+                            PlanNodeType.PROJECTION,
+                            PlanNodeType.AGGREGATE,
+                            PlanNodeType.RECEIVE),
+                   fragSpec(PlanNodeType.SEND,
+                            new PlanWithInlineNodes(PlanNodeType.SEQSCAN,
+                                                    PlanNodeType.PROJECTION,
+                                                    PlanNodeType.AGGREGATE)));
     }
 
     /**
@@ -126,14 +123,19 @@ public class TestPlansGroupBy extends PlannerTestCase {
         AbstractPlanNode p;
         List<AbstractPlanNode> pns;
 
-        pns = compileToFragments("SELECT A, count(B) from R2 where B > 2 group by A;");
-        assertEquals(1, pns.size());
-        p = pns.get(0).getChild(0);
-        assertTrue(p instanceof IndexScanPlanNode);
-        assertNotNull(p.getInlinePlanNode(PlanNodeType.HASHAGGREGATE));
-        assertTrue(p.toExplainPlanString().contains("primary key index"));
+        validatePlan("SELECT A, count(B) from R2 where B > 2 group by A;",
+                     PRINT_JSON_PLAN,
+                     fragSpec(PlanNodeType.SEND,
+                              new PlanWithInlineNodes(PlanNodeType.INDEXSCAN,
+                                                      PlanNodeType.HASHAGGREGATE,
+                                                      PlanNodeType.PROJECTION)));
 
         // matching the partial index where clause
+        validatePlan("SELECT A, count(B) from R2 where B > 3 group by A;",
+                     PRINT_JSON_PLAN,
+                     fragSpec(PlanNodeType.SEND,
+                              new PlanWithInlineNodes(AbstractJoinPlanNodeMatcher,
+                                                      PlanNodeType.AGGREGATE)));
         pns = compileToFragments("SELECT A, count(B) from R2 where B > 3 group by A;");
         assertEquals(1, pns.size());
         p = pns.get(0).getChild(0);

@@ -1695,7 +1695,7 @@ public class PlanAssembler {
         //     non-nullable column to null.
         //   - Set partitioning expressions for VALUES (...) case.
         //     TODO: it would be good someday to do the same kind of processing
-        //      for the INSERT ... SELECT ... case, by analyzing the subquery.
+        //           for the INSERT ... SELECT ... case, by analyzing the subquery.
         if (m_parsedInsert.m_isUpsert) {
             boolean hasPrimaryKey = false;
             for (Constraint constraint : targetTable.getConstraints()) {
@@ -2753,6 +2753,16 @@ public class PlanAssembler {
      *         This may have a new node pasted onto the top, or a new node added
      *         to the existing plan.
      */
+    // Cases:
+    // 1.) Number of fragments.
+    //     a.) Single fragment plans.
+    //     b.) Two fragment plans.
+    // 2.) Useful natural order, from index scan.
+    //     a.) Useful for groupby.
+    //     b.) Useful for orderby.
+    //     c.) Useful for window function ordering.
+    //     d.) May add an orderby if serial aggregation
+    //         is needed.
     private AbstractPlanNode handleAggregationOperators(AbstractPlanNode root) {
         /*
          * The query "select A from R group by A" has no aggregate

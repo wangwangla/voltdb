@@ -35,10 +35,7 @@ import org.voltdb.catalog.Database;
 import org.voltdb.compiler.DeterminismMode;
 import org.voltdb.expressions.AbstractExpression;
 import org.voltdb.expressions.TupleValueExpression;
-import org.voltdb.plannodes.AbstractPlanNode;
-import org.voltdb.plannodes.NestLoopPlanNode;
-import org.voltdb.plannodes.OrderByPlanNode;
-import org.voltdb.plannodes.SeqScanPlanNode;
+import org.voltdb.plannodes.*;
 import org.voltdb.types.ExpressionType;
 import org.voltdb.types.JoinType;
 import org.voltdb.types.PlanMatcher;
@@ -719,28 +716,23 @@ public class PlannerTestCase extends TestCase {
     }
 
     protected static class PlanWithInlineNodes implements PlanMatcher {
-        PlanNodeType m_type = null;
+        PlanMatcher m_type = null;
 
-        List<PlanNodeType> m_branches = new ArrayList<>();
-        public PlanWithInlineNodes(PlanNodeType mainType, PlanNodeType ... nodes) {
+        List<PlanMatcher> m_branches = new ArrayList<>();
+        public PlanWithInlineNodes(PlanMatcher mainType, PlanMatcher ... nodes) {
             m_type = mainType;
-            for (PlanNodeType node : nodes) {
+            for (PlanMatcher node : nodes) {
                 m_branches.add(node);
             }
         }
 
         @Override
         public String match(AbstractPlanNode node, int fragmentNo, int numberFragments) {
-            PlanNodeType mainNodeType = node.getPlanNodeType();
-            if (m_type != mainNodeType) {
-                return String.format("PlanWithInlineNode: expected main plan node type %s, got %s "
-                                     + "at plan node %d/%d, id %d.",
-                                     m_type, mainNodeType,
-                                     fragmentNo,
-                                     numberFragments,
-                                     node.getPlanNodeId());
+            String err = m_type.match(node, fragmentNo, numberFragments);
+            if (err != null) {
+                return err;
             }
-            for (PlanNodeType nodeType : m_branches) {
+            for (PlanMatcher nodeType : m_branches) {
                 AbstractPlanNode inlineNode = node.getInlinePlanNode(nodeType);
                 if (inlineNode == null) {
                     return String.format("Expected inline node type %s but didn't find it "
@@ -814,6 +806,26 @@ public class PlannerTestCase extends TestCase {
             throw new PlanningErrorException("Bad fragment specification type.");
         }
     }
+
+    protected static PlanMatcher AbstractScanPlanNodeMatcher
+            = (PlanMatcher)(AbstractPlanNode p, int fragmentNo, int numFragments) -> {
+                   if (p instanceof AbstractScanPlanNode) {
+                       return null;
+                   }
+                   return String.format("Expected AbstractScanPlanNode, not %s: fragment %d/%d",
+                                        p.getPlanNodeType(), fragmentNo, numFragments);
+
+    };
+
+    protected static PlanMatcher AbstractJoinPlanNodeMatcher
+            = (PlanMatcher)(AbstractPlanNode p, int fragmentNo, int numFragments) -> {
+        if (p instanceof AbstractJoinPlanNode) {
+            return null;
+        }
+        return String.format("Expected AbstractJoinPlanNode, not %s: fragment %d/%d",
+                             p.getPlanNodeType(), fragmentNo, numFragments);
+
+    };
 
     protected static class FragmentSpec implements PlanMatcher {
         private List<PlanMatcher> m_nodeSpecs = new ArrayList<>();
@@ -1004,20 +1016,32 @@ public class PlannerTestCase extends TestCase {
      */
     protected void validatePlan(String SQL,
                                 FragmentSpec ... spec) {
-        // All this System.out.printf nonsense should be changed
-        // to a log message somehow.
-        List<AbstractPlanNode> fragments;
-        if (spec.length > 1) {
-            fragments = compileToFragments(SQL);
-        } else {
-            fragments = new ArrayList<>();
-            fragments.add(compileForSinglePartition(SQL));
-        }
-        System.out.printf("SQL: %s\n", SQL);
-        for (int idx = 0; idx < fragments.size(); idx += 1) {
-            AbstractPlanNode node = fragments.get(idx);
-            System.out.printf("Fragment %d/%d:\n%s\n", idx + 1, fragments.size(), node.toExplainPlanString());
-            printJSONString(node);
+        validatePlan(SQL, true, spec);
+    }
+
+    /**
+     * Validate a plan.  We allow the possibility of printing
+     * the JSON and explain strings of the plan.
+     *
+     * @param SQL
+     * @param printPlan
+     * @param spec
+     */
+    protected void validatePlan(String SQL,
+                                boolean printPlan,
+                                FragmentSpec ... spec) {
+        List<AbstractPlanNode> fragments = compileToFragments(SQL);
+        assertEquals(String.format("Expected %d fragments, got %d",
+                                   spec.length,
+                                   fragments.size()),
+                     fragments.size(), fragments.size());
+        if (printPlan) {
+            System.out.printf("SQL: %s\n", SQL);
+            for (int idx = 0; idx < fragments.size(); idx += 1) {
+                AbstractPlanNode node = fragments.get(idx);
+                System.out.printf("Fragment %d/%d:\n%s\n", idx + 1, fragments.size(), node.toExplainPlanString());
+                printJSONString(node);
+            }
         }
         assertEquals(String.format("Expected %d fragments, not %d",
                                    spec.length,
