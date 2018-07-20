@@ -134,31 +134,23 @@ public class TestPlansGroupBy extends PlannerTestCase {
         validatePlan("SELECT A, count(B) from R2 where B > 3 group by A;",
                      PRINT_JSON_PLAN,
                      fragSpec(PlanNodeType.SEND,
-                              new PlanWithInlineNodes(AbstractJoinPlanNodeMatcher,
-                                                      PlanNodeType.AGGREGATE)));
-        pns = compileToFragments("SELECT A, count(B) from R2 where B > 3 group by A;");
-        assertEquals(1, pns.size());
-        p = pns.get(0).getChild(0);
-        assertTrue(p instanceof IndexScanPlanNode);
-        assertNotNull(p.getInlinePlanNode(PlanNodeType.AGGREGATE));
-        assertTrue(p.toExplainPlanString().contains("PARTIAL_IDX_R2"));
+                              new PlanWithInlineNodes(new IndexScanPlanMatcher("PARTIAL_IDX_R2"),
+                                                      PlanNodeType.AGGREGATE,
+                                                      PlanNodeType.PROJECTION)));
 
-        // using the partial index with serial aggregation
-        pns = compileToFragments("SELECT A, count(B) from R2 where A > 5 and B > 3 group by A;");
-        assertEquals(1, pns.size());
-        p = pns.get(0).getChild(0);
-        assertTrue(p instanceof IndexScanPlanNode);
-        assertNotNull(p.getInlinePlanNode(PlanNodeType.AGGREGATE));
-        assertTrue(p.toExplainPlanString().contains("PARTIAL_IDX_R2"));
+        validatePlan("SELECT A, count(B) from R2 where A > 5 and B > 3 group by A;",
+                     PRINT_JSON_PLAN,
+                     fragSpec(PlanNodeType.SEND,
+                              new PlanWithInlineNodes(new IndexScanPlanMatcher("PARTIAL_IDX_R2"),
+                                                      PlanNodeType.AGGREGATE,
+                                                      PlanNodeType.PROJECTION)));
 
-        // order by will help pick up the partial index
-        pns = compileToFragments("SELECT A, count(B) from R2 where B > 3 group by A order by A;");
-        assertEquals(1, pns.size());
-        //* enable to debug */ printExplainPlan(pns);
-        p = pns.get(0).getChild(0);
-        assertTrue(p instanceof IndexScanPlanNode);
-        assertNotNull(p.getInlinePlanNode(PlanNodeType.AGGREGATE));
-        assertTrue(p.toExplainPlanString().contains("PARTIAL_IDX_R2"));
+        validatePlan("SELECT A, count(B) from R2 where B > 3 group by A order by A;",
+                     PRINT_JSON_PLAN,
+                     fragSpec(PlanNodeType.SEND,
+                              new PlanWithInlineNodes(new IndexScanPlanMatcher("PARTIAL_IDX_R2"),
+                                                      PlanNodeType.AGGREGATE,
+                                                      PlanNodeType.PROJECTION)));
 
         // using the partial index with partial aggregation
         pns = compileToFragments("SELECT C, A, MAX(B) FROM R2 WHERE A > 0 and B > 3 GROUP BY C, A");

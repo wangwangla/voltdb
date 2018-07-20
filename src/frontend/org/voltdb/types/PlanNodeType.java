@@ -160,4 +160,9 @@ public enum PlanNodeType implements PlanMatcher {
                              numberFragments,
                              node.getPlanNodeId());
     }
+
+    @Override
+    public String matchName() {
+        return toString();
+    }
 }

@@ -32,4 +32,9 @@ public interface PlanMatcher {
      * @return
      */
     String match(AbstractPlanNode node, int fragmentNo, int numFragments);
+
+    /**
+     * Get the name of a plan matcher.
+     */
+    String matchName();
 }
